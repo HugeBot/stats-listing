@@ -2,11 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"log"
-	"strconv"
 	"strings"
 
 	"github.com/go-redis/redis"
+)
+
+var (
+	bodyPattern string = "{server_count: @server_count@}"
 )
 
 type ShardStats struct {
@@ -17,7 +21,12 @@ type ShardStats struct {
 	UpdatedAt       uint64 `json:"updatedAt"`
 }
 
-func GetRegisConnection() *redis.Client {
+type StatsToPost struct {
+	ServerCount int32
+	ShardCount  int32
+}
+
+func GetRedisConnection() *redis.Client {
 	rdb := redis.NewClient(&redis.Options{})
 
 	_, err := rdb.Ping().Result()
@@ -28,26 +37,29 @@ func GetRegisConnection() *redis.Client {
 	return rdb
 }
 
-func GetShardStatsFromDatabase(rdb *redis.Client) map[int]ShardStats {
+func BuildBodyReader(pattern string, stats StatsToPost) io.Reader {
+
+	pattern = strings.ReplaceAll(pattern, "@server_count@", string(stats.ServerCount))
+	pattern = strings.ReplaceAll(pattern, "@shard_count@", string(stats.ShardCount))
+
+	return strings.NewReader(pattern)
+}
+
+func GetShardStatsFromDatabase(rdb *redis.Client) []ShardStats {
 	result, err := rdb.HGetAll("shard-stats").Result()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	var stats map[int]ShardStats
+	stats := []ShardStats{}
 
-	for key, value := range result {
-		var s ShardStats
-		if err := json.NewDecoder(strings.NewReader(value)).Decode(s); err != nil {
+	for _, value := range result {
+		s := ShardStats{}
+		if err := json.NewDecoder(strings.NewReader(value)).Decode(&s); err != nil {
 			log.Fatal(err)
 		}
 
-		id, err := strconv.ParseInt(key, 0, 0)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		stats[int(id)] = s
+		stats = append(stats, s)
 	}
 
 	return stats
@@ -55,8 +67,17 @@ func GetShardStatsFromDatabase(rdb *redis.Client) map[int]ShardStats {
 
 func main() {
 
-	rdb := GetRegisConnection()
+	rdb := GetRedisConnection()
 
 	stats := GetShardStatsFromDatabase(rdb)
+
+	shardCount := len(stats)
+	serverCount := 0
+
+	for _, value := range stats {
+		serverCount += value.GuildsCacheSize
+	}
+
+	log.Printf("Total shards: %d, total servers: %d\n", shardCount, serverCount)
 
 }
