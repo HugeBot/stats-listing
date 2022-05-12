@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-redis/redis"
 	"gopkg.in/yaml.v2"
@@ -26,6 +27,7 @@ const (
 )
 
 type Config struct {
+	BotID    string       `yaml:"botId"`
 	Websites []Website    `yaml:"websites"`
 	Redis    RedisCondfig `yaml:"redis"`
 }
@@ -79,8 +81,6 @@ func BuildBodyReader(stats Stats, website Website) io.Reader {
 	pattern = strings.ReplaceAll(pattern, "@server_count@", strconv.Itoa(stats.ServerCount))
 	pattern = strings.ReplaceAll(pattern, "@shard_count@", strconv.Itoa(stats.ShardCount))
 
-	log.Println(pattern)
-
 	return strings.NewReader(pattern)
 }
 
@@ -119,6 +119,10 @@ func LoadConfig() {
 		log.Fatal(err)
 	}
 
+	if len(config.BotID) == 0 {
+		log.Fatal("botId must be defined con config.yaml")
+	}
+
 	if len(config.Redis.Host) == 0 {
 		config.Redis.Host = "localhost"
 	}
@@ -127,7 +131,7 @@ func LoadConfig() {
 		config.Redis.Port = 6379
 	}
 
-	for _, website := range config.Websites {
+	for i, website := range config.Websites {
 		if len(website.Name) == 0 {
 			log.Fatal("Must define a name to website")
 		}
@@ -140,13 +144,13 @@ func LoadConfig() {
 			log.Fatalf("Must define a token for website %s", website.Name)
 		}
 
-		if len(website.BodyPattern) == 0 {
-			website.BodyPattern = defaultBodyPattern
-		}
+		config.Websites[i].ApiPath = strings.ReplaceAll(website.ApiPath, "@bot_id@", config.BotID)
 	}
 }
 
-func PostStatsToWebsite(stats Stats, website Website) {
+func PostStatsToWebsite(wg *sync.WaitGroup, stats Stats, website Website) {
+	defer wg.Done()
+
 	body := BuildBodyReader(stats, website)
 
 	req, err := http.NewRequest("POST", website.ApiPath, body)
@@ -163,10 +167,12 @@ func PostStatsToWebsite(stats Stats, website Website) {
 	}
 	defer resp.Body.Close()
 
-	log.Printf("• %s: %s\n", website.Name, resp.Status)
+	log.Printf("• %s (%s): %s\n", website.Name, website.ApiPath, resp.Status)
 }
 
 func main() {
+
+	var wg sync.WaitGroup
 
 	LoadConfig()
 
@@ -195,6 +201,9 @@ func main() {
 	}
 
 	for _, website := range config.Websites {
-		PostStatsToWebsite(body, website)
+		wg.Add(1)
+		go PostStatsToWebsite(&wg, body, website)
 	}
+
+	wg.Wait()
 }

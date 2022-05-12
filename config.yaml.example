@@ -1,0 +1,19 @@
+botId: XXXXXX
+
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+
+websites:
+  - name: Top.GG
+    apiPath: https://top.gg/api/bots/@bot_id@/stats
+    token: XXXXXX
+    bodyPattern: '{"server_count": @server_count@, "shard_count": @shard_count@}'
+  - name: Discords.Bots.GG
+    apiPath: https://discord.bots.gg/api/v1/bots/@bot_id@/stats
+    token: XXXXXX
+    bodyPattern: '{"guildCount": @server_count@}'
+  - name: Discords.com
+    apiPath: https://discords.com/bots/api/bot/@bot_id@
+    token: XXXXXX
