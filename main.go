@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -33,9 +34,10 @@ type Config struct {
 }
 
 type RedisCondfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
-	Db   int    `yaml:"db"`
+	Host     string `yaml:"host"`
+	Password string `yaml:"pass"`
+	Port     int    `yaml:"port"`
+	Db       int    `yaml:"db"`
 }
 
 type Website struct {
@@ -59,7 +61,11 @@ type Stats struct {
 }
 
 func GetRedisConnection() *redis.Client {
-	rdb := redis.NewClient(&redis.Options{})
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%d", config.Redis.Host, config.Redis.Port),
+		Password: config.Redis.Password,
+		DB:       config.Redis.Db,
+	})
 
 	_, err := rdb.Ping().Result()
 	if err != nil {

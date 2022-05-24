@@ -2,6 +2,7 @@ botId: XXXXXX
 
 redis:
   host: localhost
+  pass: password
   port: 6379
   db: 0
 
