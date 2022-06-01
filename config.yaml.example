@@ -21,3 +21,4 @@ websites:
   - name: Dlist.GG
     apiPath: https://api.discordlist.gg/v0/bots/@bot_id@/guilds?count=@server_count@
     token: 'Bearer XXXXXX'
+    method: PUT
