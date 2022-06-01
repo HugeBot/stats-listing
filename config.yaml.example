@@ -11,6 +11,7 @@ websites:
     apiPath: https://top.gg/api/bots/@bot_id@/stats
     token: XXXXXX
     bodyPattern: '{"server_count": @server_count@, "shard_count": @shard_count@}'
+    method: "POST | PUT"
   - name: Discords.Bots.GG
     apiPath: https://discord.bots.gg/api/v1/bots/@bot_id@/stats
     token: XXXXXX
