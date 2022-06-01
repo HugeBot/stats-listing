@@ -162,15 +162,31 @@ func init() {
 func PostStatsToWebsite(wg *sync.WaitGroup, stats Stats, website Website) {
 	defer wg.Done()
 
-	body := BuildBodyReader(stats, website)
+	var req *http.Request
 
-	req, err := http.NewRequest(strings.ToUpper(website.Method), website.ApiPath, body)
-	if err != nil {
-		log.Fatal(err)
+	if strings.Contains(website.ApiPath, "@server_count@") {
+		website.ApiPath = strings.ReplaceAll(website.ApiPath, "@server_count@", fmt.Sprint(stats.ServerCount))
+
+		r, err := http.NewRequest(strings.ToUpper(website.Method), website.ApiPath, nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		req = r
+	} else {
+		body := BuildBodyReader(stats, website)
+
+		r, err := http.NewRequest(strings.ToUpper(website.Method), website.ApiPath, body)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+
+		req = r
 	}
 
 	req.Header.Add("Authorization", website.Token)
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
