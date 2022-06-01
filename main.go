@@ -45,6 +45,7 @@ type Website struct {
 	ApiPath     string `yaml:"apiPath"`
 	Token       string `yaml:"token"`
 	BodyPattern string `yaml:"bodyPattern"`
+	Method      string `yaml:"method"`
 }
 
 type ShardStats struct {
@@ -110,7 +111,7 @@ func GetShardStatsFromDatabase(rdb *redis.Client) []ShardStats {
 	return stats
 }
 
-func LoadConfig() {
+func init() {
 	filename, err := filepath.Abs("./config.yaml")
 	if err != nil {
 		log.Fatal(err)
@@ -138,16 +139,20 @@ func LoadConfig() {
 	}
 
 	for i, website := range config.Websites {
-		if len(website.Name) == 0 {
+		if website.Name == "" {
 			log.Fatal("Must define a name to website")
 		}
 
-		if len(website.ApiPath) == 0 {
+		if website.ApiPath == "" {
 			log.Fatalf("Must define a apiPath for website %s", website.Name)
 		}
 
-		if len(website.Token) == 0 {
+		if website.Token == "" {
 			log.Fatalf("Must define a token for website %s", website.Name)
+		}
+
+		if website.Method == "" {
+			config.Websites[i].Method = "POST"
 		}
 
 		config.Websites[i].ApiPath = strings.ReplaceAll(website.ApiPath, "@bot_id@", config.BotID)
@@ -159,7 +164,7 @@ func PostStatsToWebsite(wg *sync.WaitGroup, stats Stats, website Website) {
 
 	body := BuildBodyReader(stats, website)
 
-	req, err := http.NewRequest("POST", website.ApiPath, body)
+	req, err := http.NewRequest(strings.ToUpper(website.Method), website.ApiPath, body)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -179,8 +184,6 @@ func PostStatsToWebsite(wg *sync.WaitGroup, stats Stats, website Website) {
 func main() {
 
 	var wg sync.WaitGroup
-
-	LoadConfig()
 
 	log.Printf("Connecting with redis server at %s:%d\n", config.Redis.Host, config.Redis.Port)
 	rdb := GetRedisConnection()
