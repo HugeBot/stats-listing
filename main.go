@@ -181,7 +181,7 @@ func PostStatsToWebsite(wg *sync.WaitGroup, stats Stats, website Website) {
 			log.Fatal(err)
 		}
 
-		req.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Content-Type", "application/json")
 
 		req = r
 	}
