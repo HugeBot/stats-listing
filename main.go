@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -19,6 +20,8 @@ import (
 
 var (
 	config Config
+
+	filePath string
 
 	ErrNoConfig = errors.New("")
 )
@@ -112,7 +115,10 @@ func GetShardStatsFromDatabase(rdb *redis.Client) []ShardStats {
 }
 
 func init() {
-	filename, err := filepath.Abs("./config.yaml")
+	flag.StringVar(&filePath, "config", "./config.yaml", "Path to the config file")
+	flag.Parse()
+
+	filename, err := filepath.Abs(filePath)
 	if err != nil {
 		log.Fatal(err)
 	}
