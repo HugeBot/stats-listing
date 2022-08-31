@@ -24,6 +24,8 @@ var (
 	filePath string
 
 	ErrNoConfig = errors.New("")
+	
+	Version = "0.3.3"
 )
 
 const (
