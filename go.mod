@@ -1,4 +1,4 @@
-module hugebot/stats-listing
+module github.com/HugeBot/stats-listing
 
 go 1.18
 
