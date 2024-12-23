@@ -6,43 +6,36 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 
-	"github.com/go-redis/redis"
 	"gopkg.in/yaml.v2"
 )
 
 var (
 	config Config
 
-	filePath string
+	filePath   string
+	shardCount int
+	verbose    bool
 
 	ErrNoConfig = errors.New("")
-	
+
 	Version = "0.3.3"
 )
 
 const (
-	defaultBodyPattern = "{\"server_count\": @server_count@}"
+	defaultBodyPattern = "{\"guild_count\": @guild_count@}"
 )
 
 type Config struct {
-	BotID    string       `yaml:"botId"`
-	Websites []Website    `yaml:"websites"`
-	Redis    RedisCondfig `yaml:"redis"`
-}
-
-type RedisCondfig struct {
-	Host     string `yaml:"host"`
-	Password string `yaml:"pass"`
-	Port     int    `yaml:"port"`
-	Db       int    `yaml:"db"`
+	BotToken string    `yaml:"botToken"`
+	Websites []Website `yaml:"websites"`
 }
 
 type Website struct {
@@ -53,35 +46,13 @@ type Website struct {
 	Method      string `yaml:"method"`
 }
 
-type ShardStats struct {
-	Id              int    `json:"id"`
-	Status          string `json:"status"`
-	GuildsCacheSize int    `json:"guildsCacheSize"`
-	UsersCacheSize  int    `json:"usersCacheSize"`
-	UpdatedAt       uint64 `json:"updatedAt"`
+type ApplicationResponse struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	GuildCount *int   `json:"approximate_guild_count"`
 }
 
-type Stats struct {
-	ServerCount int
-	ShardCount  int
-}
-
-func GetRedisConnection() *redis.Client {
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%d", config.Redis.Host, config.Redis.Port),
-		Password: config.Redis.Password,
-		DB:       config.Redis.Db,
-	})
-
-	_, err := rdb.Ping().Result()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return rdb
-}
-
-func BuildBodyReader(stats Stats, website Website) io.Reader {
+func buildBodyReader(website Website, application ApplicationResponse) io.Reader {
 
 	var pattern string
 	if len(website.BodyPattern) == 0 {
@@ -90,41 +61,24 @@ func BuildBodyReader(stats Stats, website Website) io.Reader {
 		pattern = website.BodyPattern
 	}
 
-	pattern = strings.ReplaceAll(pattern, "@server_count@", strconv.Itoa(stats.ServerCount))
-	pattern = strings.ReplaceAll(pattern, "@shard_count@", strconv.Itoa(stats.ShardCount))
+	pattern = strings.ReplaceAll(pattern, "@server_count@", strconv.Itoa(*application.GuildCount))
+	pattern = strings.ReplaceAll(pattern, "@shard_count@", strconv.Itoa(shardCount))
 
 	return strings.NewReader(pattern)
 }
 
-func GetShardStatsFromDatabase(rdb *redis.Client) []ShardStats {
-	result, err := rdb.HGetAll("shard-stats").Result()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	stats := []ShardStats{}
-
-	for _, value := range result {
-		s := ShardStats{}
-		if err := json.NewDecoder(strings.NewReader(value)).Decode(&s); err != nil {
-			log.Fatal(err)
-		}
-
-		stats = append(stats, s)
-	}
-
-	return stats
-}
-
 func init() {
-	flag.StringVar(&filePath, "config", "./config.yaml", "Path to the config file")
+	flag.StringVar(&filePath, "config", "./config.yaml", "Path to the config file.")
+	flag.IntVar(&shardCount, "shards", 0, "The shard count.")
+	flag.BoolVar(&verbose, "verbose", false, "Print Application info.")
 	flag.Parse()
 
 	filename, err := filepath.Abs(filePath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	yamlFile, err := ioutil.ReadFile(filename)
+
+	yamlFile, err := os.ReadFile(filename)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -134,16 +88,12 @@ func init() {
 		log.Fatal(err)
 	}
 
-	if len(config.BotID) == 0 {
-		log.Fatal("botId must be defined con config.yaml")
+	if len(config.BotToken) == 0 {
+		log.Fatal("botToken mus be defined on config.yaml")
 	}
 
-	if len(config.Redis.Host) == 0 {
-		config.Redis.Host = "localhost"
-	}
-
-	if config.Redis.Port == 0 {
-		config.Redis.Port = 6379
+	if len(config.Websites) < 1 {
+		log.Fatal("No websites on config")
 	}
 
 	for i, website := range config.Websites {
@@ -162,18 +112,17 @@ func init() {
 		if website.Method == "" {
 			config.Websites[i].Method = "POST"
 		}
-
-		config.Websites[i].ApiPath = strings.ReplaceAll(website.ApiPath, "@bot_id@", config.BotID)
 	}
 }
 
-func PostStatsToWebsite(wg *sync.WaitGroup, stats Stats, website Website) {
+func postStatsToWebsite(wg *sync.WaitGroup, website Website, application ApplicationResponse) {
 	defer wg.Done()
 
 	var req *http.Request
 
-	if strings.Contains(website.ApiPath, "@server_count@") {
-		website.ApiPath = strings.ReplaceAll(website.ApiPath, "@server_count@", fmt.Sprint(stats.ServerCount))
+	if strings.Contains(website.ApiPath, "@guild_count@") {
+		website.ApiPath = strings.ReplaceAll(website.ApiPath, "@guild_count@", fmt.Sprint(application.GuildCount))
+		website.ApiPath = strings.ReplaceAll(website.ApiPath, "@bot_id@", application.ID)
 
 		r, err := http.NewRequest(strings.ToUpper(website.Method), website.ApiPath, nil)
 		if err != nil {
@@ -182,7 +131,7 @@ func PostStatsToWebsite(wg *sync.WaitGroup, stats Stats, website Website) {
 
 		req = r
 	} else {
-		body := BuildBodyReader(stats, website)
+		body := buildBodyReader(website, application)
 
 		r, err := http.NewRequest(strings.ToUpper(website.Method), website.ApiPath, body)
 		if err != nil {
@@ -205,37 +154,51 @@ func PostStatsToWebsite(wg *sync.WaitGroup, stats Stats, website Website) {
 	log.Printf("• %s (%s): %s\n", website.Name, website.ApiPath, resp.Status)
 }
 
+func getApplicationInfo(botToken string) (ApplicationResponse, error) {
+	var body ApplicationResponse
+
+	req, err := http.NewRequest("GET", "https://discord.com/api/v10/applications/@me", nil)
+	if err != nil {
+		return body, err
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bot %s", botToken))
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return body, err
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return body, err
+	}
+
+	return body, nil
+
+}
+
 func main() {
 
 	var wg sync.WaitGroup
 
-	log.Printf("Connecting with redis server at %s:%d\n", config.Redis.Host, config.Redis.Port)
-	rdb := GetRedisConnection()
-
-	log.Print("Retrieving HASH MAP with key shard-stats\n")
-	stats := GetShardStatsFromDatabase(rdb)
-
-	log.Print("Closing connection with the database.\n")
-	rdb.Close()
-
-	body := Stats{
-		ShardCount:  len(stats),
-		ServerCount: 0,
+	application, err := getApplicationInfo(config.BotToken)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	for _, value := range stats {
-		body.ServerCount += value.GuildsCacheSize
-	}
+	log.Printf("Application info:\n")
+	log.Printf("• ID: %s", application.ID)
+	log.Printf("• Name: %s", application.Name)
+	log.Printf("• Guild count: %d", *application.GuildCount)
 
-	log.Printf("Total shards: %d, total servers: %d\n", body.ShardCount, body.ServerCount)
-
-	if len(config.Websites) < 1 {
-		log.Fatal("No websites on config")
+	if verbose {
+		return
 	}
 
 	for _, website := range config.Websites {
 		wg.Add(1)
-		go PostStatsToWebsite(&wg, body, website)
+		go postStatsToWebsite(&wg, website, application)
 	}
 
 	wg.Wait()
